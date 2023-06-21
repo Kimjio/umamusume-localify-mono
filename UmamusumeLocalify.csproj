@@ -54,6 +54,10 @@
       <HintPath>$(UMAMUSUME_MONO_PATH)\umamusume_Data\Managed\publicized_assemblies\umamusume_publicized.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="umamusume.Http">
+      <HintPath>$(UMAMUSUME_MONO_PATH)\umamusume_Data\Managed\publicized_assemblies\umamusume.Http_publicized.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>$(UMAMUSUME_MONO_PATH)\umamusume_Data\Managed\publicized_assemblies\UnityEngine.UI_publicized.dll</HintPath>
       <Private>False</Private>

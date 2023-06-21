@@ -1,4 +1,5 @@
 ﻿using BepInEx;
+using Gallop;
 using HarmonyLib;
 using Microsoft.Win32.SafeHandles;
 using System;
@@ -47,6 +48,14 @@ namespace UmamusumeLocalify
             }
 
             // Harmony.CreateAndPatchAll(typeof(ScreenPatch));
+            Harmony.CreateAndPatchAll(typeof(GallopScreenPatch));
+            Harmony.CreateAndPatchAll(typeof(GallopInputPatch));
+            Harmony.CreateAndPatchAll(typeof(GallopFrameBufferPatch));
+            Harmony.CreateAndPatchAll(typeof(LowResolutionCameraPatch));
+            Harmony.CreateAndPatchAll(typeof(LowResolutionCameraFrameBufferPatch));
+            Harmony.CreateAndPatchAll(typeof(UIManagerPatch));
+            Harmony.CreateAndPatchAll(typeof(GraphicSettingsPatch));
+            Harmony.CreateAndPatchAll(typeof(StandaloneWindowResizePatch));
         }
     }
 

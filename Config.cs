@@ -15,6 +15,9 @@ namespace UmamusumeLocalify
         public int maxFps;
         public bool unlockSize;
         public float uiScale;
+        public bool freeFormWindow;
+        public float freeFormUiScalePortrait = 0.6f;
+        public float freeFormUiScaleLandscape = 0.5f;
         public float uiAnimationScale;
         public float resolution3dScale;
         public bool replaceToBuiltinFont;

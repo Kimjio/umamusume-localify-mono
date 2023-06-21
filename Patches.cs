@@ -8,10 +8,15 @@ using HarmonyLib;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using UnityEngine.Assertions;
 using UnityEngine.Events;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
+using UnityEngine.XR;
+using static WindowsAPI;
 
 namespace UmamusumeLocalify
 {
@@ -46,7 +51,7 @@ namespace UmamusumeLocalify
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(TitleViewController), nameof(TitleViewController.InitializeView))]
-        private static bool TitleViewController_InitializeView(TitleViewController __instance, out IEnumerator __result)
+        private static bool TitleViewController_InitializeView(TitleViewController __instance, ref IEnumerator __result)
         {
             __result = InitializeView(__instance);
             return false;
@@ -129,17 +134,26 @@ namespace UmamusumeLocalify
             Perf.Time instance = Perf.Time.Instance;
             __instance.StartCoroutine(__instance.BootCoroutine());
 
-            // TODO: Force landscape
-            Vector2 changedSize = new((UnityEngine.Screen.width > UnityEngine.Screen.height) ? UnityEngine.Screen.height : UnityEngine.Screen.width, (UnityEngine.Screen.width > UnityEngine.Screen.height) ? UnityEngine.Screen.width : UnityEngine.Screen.height);
-            changedSize = StandaloneWindowResize.GetChangedSize(changedSize.x, changedSize.y, true);
-            if (StandaloneWindowResize.CheckOverScreenSize(changedSize.x, changedSize.y))
+
+            IntPtr activeWindow = GetActiveWindow();
+            long num = GetWindowLong(activeWindow, StandaloneWindowResize.WINAPI_GWL_STYLE);
+            num |= StandaloneWindowResize.WINAPI_WS_MAXIMIZEBOX;
+
+            SetWindowLongPtr(activeWindow, StandaloneWindowResize.WINAPI_GWL_STYLE, (IntPtr)num);
+
+            if (!Config.Current.freeFormWindow)
             {
-                StandaloneWindowResize.IsPreventReShape = false;
-                StandaloneWindowResize.KeepAspectRatio(changedSize.x, changedSize.y);
-                StandaloneWindowResize.IsPreventReShape = true;
-                return false;
+                Vector2 changedSize = new((UnityEngine.Screen.width > UnityEngine.Screen.height) ? UnityEngine.Screen.height : UnityEngine.Screen.width, (UnityEngine.Screen.width > UnityEngine.Screen.height) ? UnityEngine.Screen.width : UnityEngine.Screen.height);
+                changedSize = StandaloneWindowResize.GetChangedSize(changedSize.x, changedSize.y, true);
+                if (StandaloneWindowResize.CheckOverScreenSize(changedSize.x, changedSize.y))
+                {
+                    StandaloneWindowResize.IsPreventReShape = false;
+                    StandaloneWindowResize.KeepAspectRatio(changedSize.x, changedSize.y);
+                    StandaloneWindowResize.IsPreventReShape = true;
+                    return false;
+                }
+                Gallop.Screen.SetResolution((int)changedSize.x, (int)changedSize.y, false, false);
             }
-            Gallop.Screen.SetResolution((int)changedSize.x, (int)changedSize.y, false, false);
             return false;
         }
 
@@ -177,6 +191,512 @@ namespace UmamusumeLocalify
             __instance.ValidateDonateItemCount();
             __instance.ApplyDonateItemCountText();
             __instance.OnClickPlusButton();
+        }
+    }
+
+    [HarmonyPatch(typeof(Gallop.Screen))]
+    internal class GallopScreenPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.Width), MethodType.Getter)]
+        private static bool get_Width(ref int __result)
+        {
+            __result = UnityEngine.Screen.width;
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.Height), MethodType.Getter)]
+        private static bool get_Height(ref int __result)
+        {
+            __result = UnityEngine.Screen.height;
+            return false;
+        }
+
+        /*[HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.OriginalScreenWidth), MethodType.Getter)]
+        private static bool get_OriginalScreenWidth(ref int __result)
+        {
+            __result = UnityEngine.Screen.width;
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.OriginalScreenHeight), MethodType.Getter)]
+        private static bool get_OriginalScreenHeight(ref int __result)
+        {
+            __result = UnityEngine.Screen.height;
+            return false;
+        }*/
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.SetResolution))]
+        private static bool SetResolution(ref int w, ref int h, ref bool fullscreen, ref bool forceUpdate)
+        {
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(Gallop.Screen.IsCurrentOrientation))]
+        private static bool IsCurrentOrientation(ref bool __result)
+        {
+            __result = true;
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(GraphicSettings))]
+    internal class GraphicSettingsPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(GraphicSettings.GetVirtualResolution))]
+        private static bool GetVirtualResolution(ref Vector2Int __result)
+        {
+            __result = new Vector2Int(UnityEngine.Screen.width, UnityEngine.Screen.height);
+            return false;
+        }
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(GraphicSettings.GetVirtualResolution3D))]
+        private static bool GetVirtualResolution3D(ref bool isForcedWideAspect, ref Vector2Int __result)
+        {
+            __result = new Vector2Int(UnityEngine.Screen.width, UnityEngine.Screen.height);
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(LowResolutionCamera))]
+    internal class LowResolutionCameraPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(LowResolutionCamera.UpdateDirection))]
+        private static bool UpdateDirection(LowResolutionCamera __instance)
+        {
+            if (!__instance._isInitialized)
+            {
+                return false;
+            }
+            __instance._resolution3d = MonoSingleton<GraphicSettings>.Instance.GetVirtualResolution3D(false);
+            __instance._resolution2d = MonoSingleton<GraphicSettings>.Instance.GetVirtualResolution();
+            __instance._fovFactor = 1f;
+            if (__instance.gameObject.activeInHierarchy)
+            {
+                __instance.CreateRenderTexture(ref __instance._resolution3d);
+                __instance.RemakeCommandBuffer();
+            }
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(LowResolutionCameraFrameBuffer))]
+    internal class LowResolutionCameraFrameBufferPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(LowResolutionCameraFrameBuffer.UpdateDirection))]
+        private static bool UpdateDirection(LowResolutionCameraFrameBuffer __instance)
+        {
+            if (!__instance._isInitialized)
+            {
+                return false;
+            }
+            __instance._resolution3d = MonoSingleton<GraphicSettings>.Instance.GetVirtualResolution3D(false);
+            __instance._resolution2d = MonoSingleton<GraphicSettings>.Instance.GetVirtualResolution();
+            __instance._fixScaleX = 1f;
+            __instance._fixScaleY = 1f;
+            __instance._offsetX = 0f;
+            __instance._offsetY = 0f;
+            __instance._fovFactor = 1f;
+            if (__instance._frameBuffer.Material != null)
+            {
+                Material material = __instance._frameBuffer.Material;
+                material.SetFloat(ShaderManager.GetPropertyId(ShaderManager.PropertyId._lowResFixScaleX), __instance._fixScaleX);
+                material.SetFloat(ShaderManager.GetPropertyId(ShaderManager.PropertyId._lowResFixScaleY), __instance._fixScaleY);
+                material.SetFloat(ShaderManager.GetPropertyId(ShaderManager.PropertyId._lowResOffsetX), __instance._offsetX);
+                material.SetFloat(ShaderManager.GetPropertyId(ShaderManager.PropertyId._lowResOffsetY), __instance._offsetY);
+            }
+            if (__instance.NeedUpdateCommandBuffer())
+            {
+                __instance.RemakeCommandBuffer();
+            }
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(UIManager))]
+    internal class UIManagerPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(UIManager.GetCameraSizeByOrientation))]
+        private static bool GetCameraSizeByOrientation(ScreenOrientation orientation, ref float __result)
+        {
+            __result = 5f;
+            /*if (orientation == ScreenOrientation.LandscapeLeft)
+            {
+                float num;
+                float num2;
+                if (Gallop.Screen.IsVertical)
+                {
+                    num = UnityEngine.Screen.height;
+                    num2 = UnityEngine.Screen.width;
+                }
+                else
+                {
+                    num = UnityEngine.Screen.width;
+                    num2 = UnityEngine.Screen.height;
+                }
+                __result = 5f / (num / num2);
+            }*/
+
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(UIManager.DefaultResolution), MethodType.Getter)]
+        private static bool get_DefaultResolution(ref Vector2 __result)
+        {
+            __result = new Vector2(UnityEngine.Screen.width, UnityEngine.Screen.height);
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(UIManager.WaitBootSetup))]
+        private static bool WaitBootSetup(UIManager __instance, ref IEnumerator __result)
+        {
+            __result = WaitBootSetup(__instance);
+            return false;
+        }
+
+        private static IEnumerator WaitBootSetup(UIManager __instance)
+        {
+            Vector2 defaultResolution = UIManager.DefaultResolution;
+            CanvasScaler[] canvasScalerList = __instance.GetCanvasScalerList();
+            for (int i = 0; i < canvasScalerList.Length; i++)
+            {
+                canvasScalerList[i].referenceResolution = defaultResolution;
+                if (defaultResolution.x < defaultResolution.y)
+                {
+
+                    canvasScalerList[i].scaleFactor = System.Math.Min(1, System.Math.Max(1, defaultResolution.y / 1080) * Config.Current.freeFormUiScalePortrait / (defaultResolution.y / 1080));
+                }
+                else
+                {
+                    canvasScalerList[i].scaleFactor = System.Math.Min(1, System.Math.Max(1, defaultResolution.x / 1920) * Config.Current.freeFormUiScaleLandscape / (defaultResolution.x / 1920));
+                }
+            }
+            UIManager.Instance._bgCamera.backgroundColor = Color.clear;
+            __instance.AdjustSafeArea();
+            yield return UIManager.WaitForEndOfFrame;
+            yield return UIManager.WaitForEndOfFrame;
+            __instance.CreateRenderTextureFromScreen();
+            yield break;
+        }
+    }
+
+    [HarmonyPatch(typeof(GallopInput))]
+    internal class GallopInputPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(GallopInput.mousePosition))]
+        private static bool mousePosition(ref Vector3 __result)
+        {
+            __result = Input.mousePosition;
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(GallopFrameBuffer))]
+    internal class GallopFrameBufferPatch
+    {
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(GallopFrameBuffer.Initialize))]
+        private static void Initialize(GallopFrameBuffer __instance)
+        {
+            if (!GallopFrameBuffer._frameBufferList.Contains(__instance))
+            {
+                GallopFrameBuffer._frameBufferList.Add(__instance);
+            }
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(GallopFrameBuffer.Release))]
+        private static void Release(GallopFrameBuffer __instance)
+        {
+            if (GallopFrameBuffer._frameBufferList.Contains(__instance))
+            {
+                GallopFrameBuffer._frameBufferList.Remove(__instance);
+            }
+        }
+    }
+
+    [HarmonyBefore(nameof(GallopScreenPatch))]
+    [HarmonyPatch(typeof(StandaloneWindowResize))]
+    internal class StandaloneWindowResizePatch
+    {
+        const uint WM_SIZE = 5;
+        const uint WM_CLOSE = 16;
+        const uint WM_WINDOWPOSCHANGED = 71;
+        const uint WM_SIZING = 532;
+        const uint WM_SYSCOMMAND = 274;
+        static readonly IntPtr SC_MAXIMIZE = new(61490);
+        static readonly IntPtr SC_MINIMIZE = new(61472);
+        static readonly IntPtr SC_RESTORE = new(61728);
+        static readonly IntPtr SC_RESTORE_1 = new(61730);
+
+        struct WINDOWPOS
+        {
+            public IntPtr hwnd;
+            public IntPtr hwndInsertAfter;
+            public int x;
+            public int y;
+            public int Width;
+            public int Height;
+            public uint flags;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        struct Size
+        {
+            public Size(IntPtr raw)
+            {
+                this.raw = raw;
+            }
+
+            [FieldOffset(0)]
+            public IntPtr raw;
+
+            [FieldOffset(0)]
+            public ushort Low;
+
+            [FieldOffset(2)]
+            public ushort High;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(StandaloneWindowResize.ReshapeAspectRatio))]
+        private static bool ReshapeAspectRatio()
+        {
+            return false;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(StandaloneWindowResize.KeepAspectRatio))]
+        private static bool KeepAspectRatio(ref float currentWidth, ref float currentHeight)
+        {
+            return false;
+        }
+
+        private static IEnumerator ResizeStartCoroutine(Vector2 vector)
+        {
+            StandaloneWindowResize.IsPreventReShape = true;
+            StandaloneWindowResize.DisableWindowHitTest();
+
+            bool isVert = vector.x < vector.y;
+
+            yield return new WaitForEndOfFrame();
+            if (MonoSingleton<UIManager>.HasInstance())
+            {
+                Gallop.Screen.InitializeChangeScaleForPC(isVert, out Gallop.Screen._bgCameraSettings);
+                UIManager.Instance._bgCamera.backgroundColor = Color.clear;
+            }
+
+            AnMonoSingleton<AnRootManager>.Instance.ScreenRate = StandaloneWindowResize._aspectRatio;
+
+            // UnityEngine.Screen.SetResolution((int)vector.x, (int)vector.y, false, 0);
+            // StandaloneWindowResize.KeepAspectRatio();
+            Gallop.Screen.UpdateForPC();
+
+            if (MonoSingleton<UIManager>.HasInstance())
+            {
+                MonoSingleton<UIManager>.Instance.ChangeResizeUIForPC((int)vector.x, (int)vector.y);
+
+                UnityEngine.Screen.orientation = ScreenOrientation.AutoRotation;
+
+                MonoSingleton<UIManager>.Instance.gameObject.transform.localScale = new Vector3(1f, 1f, 1f);
+                MonoSingleton<UIManager>.Instance.EndOrientation(ref Gallop.Screen._bgCameraSettings);
+                MonoSingleton<TapEffectController>.Instance.Enable();
+                Vector2 resolution = vector;
+                //res.x /= (max(1.0f, res.x / 1920.f) * g_force_landscape_ui_scale);
+                // res.y /= (max(1.0f, res.y / 1080.f) * g_force_landscape_ui_scale);
+                CanvasScaler[] canvasScalerList = MonoSingleton<UIManager>.Instance.GetCanvasScalerList();
+                CanvasScaler[] array = canvasScalerList;
+                for (int i = 0; i < array.Length; i++)
+                {
+                    CanvasScaler canvasScaler = array[i];
+                    bool keepActive = canvasScaler.gameObject.activeSelf;
+                    canvasScaler.gameObject.SetActive(true);
+                    canvasScaler.referenceResolution = resolution;
+                    canvasScaler.gameObject.SetActive(keepActive);
+                    if (isVert)
+                    {
+
+                        canvasScaler.scaleFactor = System.Math.Min(1, System.Math.Max(1, vector.y / 1080) * Config.Current.freeFormUiScalePortrait / (vector.y / 1080));
+                    }
+                    else
+                    {
+                        canvasScaler.scaleFactor = System.Math.Min(1, System.Math.Max(1, vector.x / 1920) * Config.Current.freeFormUiScaleLandscape / (vector.x / 1920));
+
+                    }
+                }
+
+                yield return new WaitForEndOfFrame();
+                yield return new WaitForEndOfFrame();
+                MonoSingleton<UIManager>.Instance.AdjustSafeArea();
+                MonoSingleton<UIManager>.Instance._bgManager.OnChangeResolutionByGraphicsSettings();
+                yield return UIManager.WaitForEndOfFrame;
+                yield return UIManager.WaitForEndOfFrame;
+
+                yield return UIManager.WaitForEndOfFrame;
+                yield return UIManager.WaitForEndOfFrame;
+                MonoSingleton<UIManager>.Instance.CheckUIToFrameBufferBlitInstance();
+                MonoSingleton<UIManager>.Instance.ReleaseRenderTexture();
+
+                // int width = Gallop.Screen.Width;
+                // int height = Gallop.Screen.Height;
+                int width = UnityEngine.Screen.width;
+                int height = UnityEngine.Screen.height;
+                // width *= Display.main.systemWidth / 1920;
+                // height *= Display.main.systemHeight / 1080;
+                MonoSingleton<UIManager>.Instance._uiTexture = new RenderTexture(width, height, 24)
+                {
+                    autoGenerateMips = false,
+                    useMipMap = false,
+                    antiAliasing = 1
+                };
+                if (!MonoSingleton<UIManager>.Instance._uiTexture.Create())
+                {
+                    MonoSingleton<UIManager>.Instance.ReleaseRenderTexture();
+                }
+
+                MonoSingleton<UIManager>.Instance._uiCommandBuffer.Blit(MonoSingleton<UIManager>.Instance._uiTexture, BuiltinRenderTextureType.CurrentActive, MonoSingleton<UIManager>.Instance._blitToFrameMaterial);
+                MonoSingleton<UIManager>.Instance._uiCamera.targetTexture = MonoSingleton<UIManager>.Instance._uiTexture;
+                MonoSingleton<UIManager>.Instance._bgCamera.targetTexture = MonoSingleton<UIManager>.Instance._uiTexture;
+                MonoSingleton<UIManager>.Instance._noImageEffectUICamera.targetTexture = MonoSingleton<UIManager>.Instance._uiTexture;
+                if (MonoSingleton<UIManager>.Instance._uiToFrameBufferBlitCamera != null)
+                {
+                    MonoSingleton<UIManager>.Instance._uiToFrameBufferBlitCamera.enabled = true;
+                }
+            }
+
+            GraphicSettings.Instance.Update3DRenderTexture();
+
+            if (MonoSingleton<TapEffectController>.HasInstance())
+            {
+                MonoSingleton<TapEffectController>.Instance.RefreshAll();
+            }
+            if (MonoSingleton<UIManager>.HasInstance())
+            {
+                MonoSingleton<UIManager>.Instance.AdjustMissionClearContentsRootRect();
+                MonoSingleton<UIManager>.Instance.AdjustSafeAreaToAnnounceRect();
+                UIManager.Instance._bgCamera.backgroundColor = Color.clear;
+            }
+
+            if (RaceManager.HasInstance())
+            {
+                if (RaceManager.Instance.State == RaceDefine.RaceState.WinningCircle || RaceManager.Instance.State == RaceDefine.RaceState.End)
+                {
+                    RaceManager.Instance.StartCoroutine(
+                        RaceManager.Instance.RaceMainView._resultList.MakeResultCuttCapture(RaceCameraManager.Instance.CurrentCamera, RaceCameraManager.Instance.FrameBuffer._renderBuffer, 
+                        delegate {
+                            RaceCameraManager.Instance.SetCourseCameraEnable(true);
+                            MonoSingleton<RaceManager>.Instance.InitRaceResultCapture();
+                        },
+                        delegate
+                        {
+                            RaceCameraManager.Instance.SetCourseCameraEnable(false);
+                            MonoSingleton<RaceManager>.Instance.ReleaseRaceResultScene(false);
+                        }));
+                }
+            }
+
+            StandaloneWindowResize.EnableWindowHitTest();
+            StandaloneWindowResize.IsPreventReShape = false;
+            yield break;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(nameof(StandaloneWindowResize.WndProc))]
+        private static bool WndProc(IntPtr _hWnd, uint _msg, IntPtr _wParam, IntPtr lParam, ref IntPtr __result)
+        {
+
+            if (_msg == WM_CLOSE)
+            {
+                Application.Quit();
+                __result = IntPtr.Zero;
+                return false;
+            }
+
+            if (_msg == WM_SIZE)
+            {
+                IntPtr activeWindow = GetActiveWindow();
+                long num = GetWindowLong(activeWindow, StandaloneWindowResize.WINAPI_GWL_STYLE);
+                num |= StandaloneWindowResize.WINAPI_WS_MAXIMIZEBOX;
+
+                SetWindowLongPtr(activeWindow, StandaloneWindowResize.WINAPI_GWL_STYLE, (IntPtr)num);
+
+                var size = new Size(lParam);
+                if (StandaloneWindowResize.windowLastWidth != size.Low || StandaloneWindowResize.windowLastHeight != size.High)
+                {
+                    Vector2 windowFrameSize = GetWindowFrameSize();
+                    int contentWidth = size.Low - (int)windowFrameSize.x;
+                    int contentHeight = size.High - (int)windowFrameSize.y;
+                    Vector3 vector = new Vector3(contentWidth, contentHeight, 1f);
+                    StandaloneWindowResize.windowLastWidth = size.Low;
+                    StandaloneWindowResize.windowLastHeight = size.High;
+                    StandaloneWindowResize.SaveChangedWidth(UnityEngine.Screen.width, UnityEngine.Screen.height);
+                    StandaloneWindowResize._aspectRatio = vector.x / vector.y;
+
+                    UIManager.Instance.StartCoroutine(ResizeStartCoroutine(vector));
+                }
+                __result = CallWindowProc(StandaloneWindowResize.oldWndProcPtr, _hWnd, _msg, _wParam, lParam);
+                return false;
+            }
+
+            if (_msg == WM_SIZING)
+            {
+                WinAPIRect structure = (WinAPIRect)Marshal.PtrToStructure(lParam, typeof(WinAPIRect));
+                if (StandaloneWindowResize.windowLastWidth != structure.Width || StandaloneWindowResize.windowLastHeight != structure.Height)
+                {
+                    Vector2 windowFrameSize = GetWindowFrameSize();
+                    int num = (int)_wParam;
+                    bool flag = num == 7 || num == 1 || num == 4;
+                    bool flag2 = num == 3 || num == 4 || num == 5;
+                    int contentWidth = structure.Width - (int)windowFrameSize.x;
+                    int contentHeight = structure.Height - (int)windowFrameSize.y;
+                    Vector3 vector = new Vector3(contentWidth, contentHeight, 1f);
+                    int num8 = (int)vector.x + (int)windowFrameSize.x;
+                    int num9 = (int)vector.y + (int)windowFrameSize.y;
+                    if (flag)
+                    {
+                        structure.Left = structure.Right - num8;
+                    }
+                    else
+                    {
+                        structure.Right = structure.Left + num8;
+                    }
+                    if (flag2)
+                    {
+                        structure.Top = structure.Bottom - num9;
+                    }
+                    else
+                    {
+                        structure.Bottom = structure.Top + num9;
+                    }
+                    Marshal.StructureToPtr(structure, lParam, true);
+                    StandaloneWindowResize.windowLastWidth = structure.Width;
+                    StandaloneWindowResize.windowLastHeight = structure.Height;
+                    StandaloneWindowResize.SaveChangedWidth(UnityEngine.Screen.width, UnityEngine.Screen.height);
+                    StandaloneWindowResize._aspectRatio = vector.x / vector.y;
+                }
+                __result = CallWindowProc(StandaloneWindowResize.oldWndProcPtr, _hWnd, _msg, _wParam, lParam);
+                return false;
+            }
+            return true;
+        }
+
+        [HarmonyPatch(nameof(StandaloneWindowResize.DisableMaximizebox))]
+        private static bool DisableMaximizebox()
+        {
+            Console.WriteLine("DisableMaximizebox");
+            return false;
         }
     }
 
